@@ -9,7 +9,7 @@
 ### Установка и запуск
 
 ```bash
-git clone <repo-url> bitrix-test
+git clone https://github.com/DanilStrelkov/BitrixVue.js.git
 cd bitrix-test
 composer install
 ```
