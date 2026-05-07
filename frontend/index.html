@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Каталог товаров</title>
+    <script src="/frontend/vue.global.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; padding: 24px; background: #f5f5f5; }
+        h1 { margin-bottom: 24px; }
+        .layout { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+
+        /* Таблица */
+        .table-wrap { flex: 1; min-width: 400px; background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f0f0f0; font-weight: 600; }
+        tr.low-stock td { background: #fff3e0; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+        .badge-low { background: #ff9800; color: #fff; }
+        .status { padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+        .status-loading { background: #e3f2fd; color: #1565c0; }
+        .status-error { background: #fce4ec; color: #b71c1c; }
+
+        /* Форма */
+        .form-wrap { width: 320px; background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+        .form-wrap h2 { margin-bottom: 16px; font-size: 18px; }
+        .field { margin-bottom: 14px; }
+        label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+        select, input[type=number] { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        select:focus, input:focus { outline: none; border-color: #1976d2; }
+        .field-error { font-size: 12px; color: #d32f2f; margin-top: 4px; }
+        button[type=submit] { width: 100%; padding: 10px; background: #1976d2; color: #fff; border: none; border-radius: 6px; font-size: 15px; cursor: pointer; }
+        button[type=submit]:disabled { background: #90caf9; cursor: not-allowed; }
+        .success-msg { margin-top: 12px; padding: 10px; background: #e8f5e9; color: #2e7d32; border-radius: 6px; font-size: 14px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <h1>Каталог товаров</h1>
+    <div class="layout">
+        <product-table
+            :products="products"
+            :loading="loading"
+            :error="fetchError"
+        ></product-table>
+        <order-form
+            :products="products"
+            @order-placed="handleOrderPlaced"
+        ></order-form>
+    </div>
+</div>
+
+<script>
+const { createApp, ref, computed } = Vue;
+
+const ProductTable = {
+    props: {
+        products: { type: Array, required: true },
+        loading:  { type: Boolean, default: false },
+        error:    { type: String, default: '' },
+    },
+    template: `
+        <div class="table-wrap">
+            <h2 style="margin-bottom:12px">Товары</h2>
+            <div v-if="loading" class="status status-loading">Загрузка...</div>
+            <div v-else-if="error" class="status status-error">{{ error }}</div>
+            <template v-else>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Артикул</th>
+                            <th>Название</th>
+                            <th>Цена, ₽</th>
+                            <th>Остаток</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="p in products" :key="p.id" :class="{ 'low-stock': p.quantity <= 3 }">
+                            <td>{{ p.article }}</td>
+                            <td>{{ p.name }}</td>
+                            <td>{{ p.price.toLocaleString('ru-RU') }}</td>
+                            <td>
+                                {{ p.quantity }}
+                                <span v-if="p.quantity <= 3" class="badge badge-low">мало</span>
+                            </td>
+                        </tr>
+                        <tr v-if="products.length === 0">
+                            <td colspan="4" style="text-align:
+                            center;color:#999">Нет товаров</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </template>
+        </div>
+    `,
+};
+
+const OrderForm = {
+    props: {
+        products: { type: Array, required: true },
+    },
+    emits: ['order-placed'],
+    setup(props, { emit }) {
+        const selectedId  = ref('');
+        const qty         = ref('');
+        const qtyError    = ref('');
+        const submitting  = ref(false);
+        const successMsg  = ref('');
+
+        const selectedProduct = computed(() =>
+            props.products.find(p => p.id === Number(selectedId.value)) || null
+        );
+
+        function validate() {
+            qtyError.value = '';
+            const q = Number(qty.value);
+            if (!selectedId.value) {
+                qtyError.value = 'Выберите товар';
+                return false;
+            }
+            if (!q || q <= 0) {
+                qtyError.value = 'Количество должно быть больше нуля';
+                return false;
+            }
+            if (selectedProduct.value && q > selectedProduct.value.quantity) {
+                qtyError.value = `Недостаточно на складе. Доступно: ${selectedProduct.value.quantity}`;
+                return false;
+            }
+            return true;
+        }
+
+        async function submit() {
+            if (!validate()) return;
+            submitting.value = true;
+            successMsg.value = '';
+            try {
+                const res = await fetch('/ajax/order.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ productId: Number(selectedId.value), quantity: Number(qty.value) }),
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    qtyError.value = data.error || 'Ошибка при оформлении заказа';
+                    return;
+                }
+                successMsg.value = `Заказ оформлен! Осталось на складе: ${data.newQuantity} шт.`;
+                emit('order-placed', { productId: Number(selectedId.value), newQuantity: data.newQuantity });
+                selectedId.value = '';
+                qty.value = '';
+            } catch {
+                qtyError.value = 'Ошибка сети. Проверьте соединение.';
+            } finally {
+                submitting.value = false;
+            }
+        }
+
+        return { selectedId, qty, qtyError, submitting, successMsg, selectedProduct, submit };
+    },
+    template: `
+        <div class="form-wrap">
+            <h2>Оформить заказ</h2>
+            <form @submit.prevent="submit">
+                <div class="field">
+                    <label>Товар</label>
+                    <select v-model="selectedId">
+                        <option value="">— выберите товар —</option>
+                        <option v-for="p in products" :key="p.id" :value="p.id" :disabled="p.quantity === 0">
+                            {{ p.name }} ({{ p.quantity }} шт.)
+                        </option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Количество</label>
+                    <input type="number" v-model="qty" min="1" :max="selectedProduct ? selectedProduct.quantity : undefined" placeholder="0" />
+                    <div v-if="qtyError" class="field-error">{{ qtyError }}</div>
+                </div>
+                <button type="submit" :disabled="submitting">
+                    {{ submitting ? 'Отправка...' : 'Заказать' }}
+                </button>
+            </form>
+            <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
+        </div>
+    `,
+};
+
+const app = createApp({
+    components: { ProductTable, OrderForm },
+    setup() {
+        const products   = ref([]);
+        const loading    = ref(true);
+        const fetchError = ref('');
+
+        async function fetchProducts() {
+            loading.value = true;
+            fetchError.value = '';
+            try {
+                const res  = await fetch('/ajax/products.php');
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Ошибка загрузки');
+                products.value = data.data;
+            } catch (e) {
+                fetchError.value = e.message;
+            } finally {
+                loading.value = false;
+            }
+        }
+
+        function handleOrderPlaced({ productId, newQuantity }) {
+            const p = products.value.find(p => p.id === productId);
+            if (p) p.quantity = newQuantity;
+        }
+
+        fetchProducts();
+        return { products, loading, fetchError, handleOrderPlaced };
+    },
+});
+
+app.mount('#app');
+</script>
+</body>
+</html>
